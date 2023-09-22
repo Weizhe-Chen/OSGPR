@@ -216,19 +216,6 @@ class OSGPR_VFE(gpflow.models.GPModel,
         return mean + self.mean_function(Xnew), var
 
 
-def figsize(scale, ratio=None):
-    fig_width_pt = 397.4849  # Get this from LaTeX using \the\textwidth
-    inches_per_pt = 1.0 / 72.27  # Convert pt to inch
-    golden_mean = (np.sqrt(5.0) -
-                   1.0) / 4  # Aesthetic ratio (you could change this)
-    if ratio is not None:
-        golden_mean = ratio
-    fig_width = fig_width_pt * inches_per_pt * scale  # width in inches
-    fig_height = fig_width * golden_mean  # height in inches
-    fig_size = [fig_width, fig_height]
-    return fig_size
-
-
 def init_Z(cur_Z, new_X, use_old_Z=True, first_batch=True):
     if use_old_Z:
         Z = np.copy(cur_Z)
@@ -290,95 +277,75 @@ def optimize(model, **options):
                                        options=options)
 
 
-def main(M, use_old_Z, shuffle):
-    fig, axs = plt.subplots(4,
-                            1,
-                            figsize=figsize(1, ratio=12.0 / 19.0),
-                            sharey=True,
-                            sharex=True)
+def run_one_batch(ax, X, y, seen_X, seen_y, test_X, is_first_batch, old_Z=None, old_model=None, old_mu=None, old_Su=None, old_Kaa=None):
+    if is_first_batch:
+        Z = X[np.random.permutation(X.shape[0])[0:10], :]
+        model = gpflow.models.SGPR(
+            (X, y),
+            gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
+            inducing_variable=Z,
+            noise_variance=0.001,
+        )
+    else:
+        Z = init_Z(old_Z, X, use_old_Z=False)
+        model = OSGPR_VFE(
+            (X, y),
+            gpflow.kernels.RBF(
+                variance=old_model.kernel.variance,
+                lengthscales=old_model.kernel.lengthscales,
+            ),
+            old_mu,
+            old_Su,
+            old_Kaa,
+            old_Z,
+            Z,
+        )
+        model.likelihood.variance.assign(old_model.likelihood.variance)
+    optimize(model, disp=1)
+    mu, Su, Z = plot_model(model, ax, X, y, test_X, seen_X, seen_y)
+    Kaa = model.kernel(model.inducing_variable.Z)
+    return model, mu, Su, Z, Kaa
 
+
+def main(shuffle):
+    fig, axs = plt.subplots(
+        4,
+        1,
+        sharey=True,
+        sharex=True,
+    )
     X, y = get_data(shuffle)
-
     N = X.shape[0]
+    test_X = np.linspace(-2, 12, 100)[:, None]
     gap = N // 3
 
     # get the first portion and call sparse GP regression
     X1 = X[:gap, :]
     y1 = y[:gap, :]
-    seen_x = None
-    seen_y = None
-    # Z1 = np.random.rand(M, 1)*L
-    Z1 = X1[np.random.permutation(X1.shape[0])[0:M], :]
-
-    model1 = gpflow.models.SGPR((X1, y1),
-                                gpflow.kernels.RBF(variance=1.0,
-                                                   lengthscales=0.8),
-                                inducing_variable=Z1,
-                                noise_variance=0.001)
-    optimize(model1, disp=1)
-
-    # plot prediction
-    xx = np.linspace(-2, 12, 100)[:, None]
-    mu1, Su1, Zopt = plot_model(model1, axs[0], X1, y1, xx, seen_x, seen_y)
+    model, mu, Su, Z, Kaa = run_one_batch(axs[0], X1, y1, seen_X=None, seen_y=None, test_X=test_X, is_first_batch=True)
 
     # now call online method on the second portion of the data
     X2 = X[gap:2 * gap, :]
     y2 = y[gap:2 * gap, :]
-    seen_x = X[:gap, :]
+    seen_X = X[:gap, :]
     seen_y = y[:gap, :]
-
-    Kaa1 = model1.kernel(model1.inducing_variable.Z)
-
-    Zinit = init_Z(Zopt, X2, use_old_Z)
-    model2 = OSGPR_VFE(
-        (X2, y2),
-        gpflow.kernels.RBF(variance=model1.kernel.variance,
-                           lengthscales=model1.kernel.lengthscales), mu1, Su1,
-        Kaa1, Zopt, Zinit)
-    model2.likelihood.variance.assign(model1.likelihood.variance)
-    optimize(model2, disp=1)
-
-    # plot prediction
-    mu2, Su2, Zopt = plot_model(model2, axs[1], X2, y2, xx, seen_x, seen_y)
+    model, mu, Su, Z, Kaa = run_one_batch(axs[1], X2, y2, seen_X, seen_y, test_X, is_first_batch=False, old_Z=Z, old_model=model, old_mu=mu, old_Su=Su, old_Kaa=Kaa)
 
     # now call online method on the third portion of the data
     X3 = X[2 * gap:3 * gap, :]
     y3 = y[2 * gap:3 * gap, :]
-    seen_x = np.vstack((seen_x, X2))
+    seen_X = np.vstack((seen_X, X2))
     seen_y = np.vstack((seen_y, y2))
+    model, mu, Su, Z, Kaa = run_one_batch(axs[2], X3, y3, seen_X, seen_y, test_X, is_first_batch=False, old_Z=Z, old_model=model, old_mu=mu, old_Su=Su, old_Kaa=Kaa)
 
-    Kaa2 = model2.kernel(model2.inducing_variable.Z)
-
-    Zinit = init_Z(Zopt, X3, use_old_Z)
-    model3 = OSGPR_VFE(
-        (X3, y3),
-        gpflow.kernels.RBF(variance=model2.kernel.variance,
-                           lengthscales=model2.kernel.lengthscales), mu2, Su2,
-        Kaa2, Zopt, Zinit)
-    model3.likelihood.variance.assign(model2.likelihood.variance)
-    optimize(model3, disp=1)
-    mu3, Su3, Zopt = plot_model(model3, axs[2], X3, y3, xx, seen_x, seen_y)
-
-    Z4 = X[np.random.permutation(X.shape[0])[0:M], :]
-    model4 = gpflow.models.SGPR((X, y),
-                                gpflow.kernels.RBF(variance=1.0,
-                                                   lengthscales=0.8),
-                                inducing_variable=Z4,
-                                noise_variance=0.001)
-    optimize(model4, disp=1)
-
-    # plot prediction
-    xx = np.linspace(-2, 12, 100)[:, None]
-    mu4, Su4, Zopt4 = plot_model(model4, axs[3], X, y, xx, None, None)
+    # Run full model
+    run_one_batch(axs[3], X, y, seen_X, seen_y, test_X, is_first_batch=True)
     axs[3].set_xlabel('x')
     fig.tight_layout()
     plt.show()
 
 
 if __name__ == '__main__':
-    M = 10
-    use_old_Z = False
-    seed = 10
     shuffle = False
-    np.random.seed(seed)
-    main(M, use_old_Z, shuffle)
+    np.random.seed(10)
+    main(shuffle)
