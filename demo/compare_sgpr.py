@@ -7,15 +7,16 @@ warnings.filterwarnings("ignore")
 from copy import deepcopy
 
 import gpflow
+import gpytorch
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import tensorflow as tf
+import torch
+from botorch.fit import fit_gpytorch_model
 from gpflow import covariances, utilities
 from gpflow.models import GPModel, InternalDataTrainingLossMixin
-import torch
-import gpytorch
-from botorch.fit import fit_gpytorch_model
+
 
 class SGPR(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, kernel, inducing_points, noise_variance):
@@ -25,7 +26,9 @@ class SGPR(gpytorch.models.ExactGP):
         likelihood.noise = noise_variance
         super().__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ZeroMean()
-        self.covar_module = gpytorch.kernels.InducingPointKernel(kernel, inducing_points=inducing_points, likelihood=likelihood)
+        self.covar_module = gpytorch.kernels.InducingPointKernel(
+            kernel, inducing_points=inducing_points, likelihood=likelihood
+        )
 
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -55,7 +58,6 @@ class SGPR(gpytorch.models.ExactGP):
     def z_mean(self):
         z_mean, _ = self.predict(self.inducing_points)
         return z_mean
-
 
 
 class OSGPR(GPModel, InternalDataTrainingLossMixin):
@@ -376,7 +378,7 @@ def main(is_iid_data, num_inducing=10):
     kernel = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
     kernel.outputscale = 1.0
     kernel.base_kernel.lengthscale = 0.8
-    z_array = train_x[np.random.permutation(train_x.shape[0])[: num_inducing], :]
+    z_array = train_x[np.random.permutation(train_x.shape[0])[:num_inducing], :]
     z_tensor = torch.from_numpy(z_array).double()
     noise_variance = 0.001
     model = SGPR(train_x, train_y, kernel, z_tensor, noise_variance)
@@ -401,7 +403,7 @@ def main(is_iid_data, num_inducing=10):
     model = GPflowModel(num_inducing=num_inducing)
     model.fit(train_x, train_y)
     mean_tf, var_tf = model.predict(test_x)
-    
+
     plot_result(
         axes[1],
         train_x,
