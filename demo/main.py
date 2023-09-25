@@ -26,6 +26,7 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         Su_old,
         Kaa_old,
         mean_function=None,
+        jitter=1e-4,
     ):
         """
         X is a data matrix, size N x D
@@ -45,6 +46,7 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         super().__init__(kernel, likelihood, mean_function, num_latent_gps)
         self.inducing_variable = gpflow.inducing_variables.InducingPoints(Z)
         self.num_data = self.train_x.shape[0]
+        self.jitter = utilities.to_default_float(jitter)
 
         self.mu_old = tf.Variable(
             mu_old,
@@ -77,17 +79,16 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
 
         Kfdiag = self.kernel(self.train_x, full_cov=False)
         Mb = self.inducing_variable.num_inducing
-        jitter = utilities.to_default_float(1e-4)
         sigma2 = self.likelihood.variance
         sigma = tf.sqrt(sigma2)
         Saa = self.Su_old
         ma = self.mu_old
 
         Kbf = covariances.Kuf(self.inducing_variable, self.kernel, self.train_x)
-        Kbb = covariances.Kuu(self.inducing_variable, self.kernel, jitter=jitter)
+        Kbb = covariances.Kuu(self.inducing_variable, self.kernel, jitter=self.jitter)
         Kba = covariances.Kuf(self.inducing_variable, self.kernel, self.old_z)
-        Kaa_cur = utilities.add_noise_cov(self.kernel(self.old_z), jitter)
-        z_kernel_mat = utilities.add_noise_cov(self.Kaa_old, jitter)
+        Kaa_cur = utilities.add_noise_cov(self.kernel(self.old_z), self.jitter)
+        z_kernel_mat = utilities.add_noise_cov(self.Kaa_old, self.jitter)
 
         err = self.Y - self.mean_function(self.train_x)
 
@@ -114,7 +115,7 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         d3 = tf.matmul(Lainv_Kab_Lbinv, Lainv_Kab_Lbinv, transpose_a=True)
 
         D = tf.eye(Mb, dtype=gpflow.default_float()) + d1 + d2 - d3
-        D = utilities.add_noise_cov(D, jitter)
+        D = utilities.add_noise_cov(D, self.jitter)
         LD = tf.linalg.cholesky(D)
 
         LDinv_Lbinv_c = tf.linalg.triangular_solve(LD, Lbinv_c, lower=True)
@@ -148,10 +149,8 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         return bound
 
     def predict_f(self, test_x, full_cov=False):
-        jitter = utilities.to_default_float(1e-4)
-
         Kbs = covariances.Kuf(self.inducing_variable, self.kernel, test_x)
-        Kbb = covariances.Kuu(self.inducing_variable, self.kernel, jitter=jitter)
+        Kbb = covariances.Kuu(self.inducing_variable, self.kernel, jitter=self.jitter)
         Kbf = covariances.Kuf(self.inducing_variable, self.kernel, self.train_x)
         Kba = covariances.Kuf(self.inducing_variable, self.kernel, self.old_z)
 
@@ -170,14 +169,14 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         LSainv_Kab_Lbinv = tf.linalg.triangular_solve(LSa, Kab_Lbinv, lower=True)
         d2 = tf.matmul(LSainv_Kab_Lbinv, LSainv_Kab_Lbinv, transpose_a=True)
 
-        z_kernel_mat = utilities.add_noise_cov(self.Kaa_old, jitter)
+        z_kernel_mat = utilities.add_noise_cov(self.Kaa_old, self.jitter)
         La = tf.linalg.cholesky(z_kernel_mat)
         Lainv_Kab_Lbinv = tf.linalg.triangular_solve(La, Kab_Lbinv, lower=True)
         d3 = tf.matmul(Lainv_Kab_Lbinv, Lainv_Kab_Lbinv, transpose_a=True)
 
         Mb = self.inducing_variable.num_inducing
         D = tf.eye(Mb, dtype=gpflow.default_float()) + d1 + d2 - d3
-        D = utilities.add_noise_cov(D, jitter)
+        D = utilities.add_noise_cov(D, self.jitter)
         LD = tf.linalg.cholesky(D)
 
         # Compute LDinv_Lbinv_c
@@ -195,7 +194,7 @@ class OSGPR(GPModel, InternalDataTrainingLossMixin):
         mean = tf.matmul(LDinv_Lbinv_Kbs, LDinv_Lbinv_c, transpose_a=True)
 
         if full_cov:
-            Kss = self.kernel(test_x) + jitter * tf.eye(
+            Kss = self.kernel(test_x) + self.jitter * tf.eye(
                 tf.shape(test_x)[0], dtype=gpflow.default_float()
             )
             var1 = Kss
@@ -271,7 +270,7 @@ class GPflowModel:
     def summarize(self):
         self.z = self.inducing_points
         self.z_mean, self.z_covar_mat = self.model.predict_f(self.z, full_cov=True)
-        self.z_kernel_mat = self.model.kernel(self.model.inducing_variable.Z)
+        self.z_kernel_mat = self.model.kernel(self.z)
 
         if len(self.z_covar_mat.shape) == 3:
             self.z_covar_mat = self.z_covar_mat[0, :, :]
