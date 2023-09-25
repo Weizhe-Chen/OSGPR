@@ -6,6 +6,57 @@ import tensorflow as tf
 from gpflow import covariances, utilities
 from gpflow.models import GPModel, InternalDataTrainingLossMixin
 
+tf.keras.backend.set_floatx("float64")
+
+class AttentiveKernel(gpflow.kernels.Kernel):
+    def __init__(self, dim_input=1, dim_hidden=10, dim_output=10):
+        super().__init__()
+        lengthscales = np.linspace(0.01, 0.5, num=dim_output)
+        self.amplitude = gpflow.Parameter(1.0, transform=gpflow.utilities.positive())
+        self.lengthscales = gpflow.Parameter(lengthscales, trainable=False)
+        with tf.name_scope("nn"):
+            self.nn = tf.keras.Sequential()
+            self.nn.add(tf.keras.layers.Dense(dim_hidden, input_shape=(dim_input,), activation='tanh'))
+            self.nn.add(tf.keras.layers.Dense(dim_hidden, activation='tanh'))
+            self.nn.add(tf.keras.layers.Dense(dim_output, activation='softmax'))
+            self.nn.build()
+
+    def get_representations(self, X):
+        Z = self.nn(X)
+        representations = Z / tf.norm(Z, axis=1, keepdims=True)
+        return representations
+
+    def K_diag(self, X):
+        return tf.fill((tf.shape(X)[0], 1), self.amplitude)
+
+    def K(self, X1, X2=None):
+        if X2 is None:
+            X2 = X1
+
+        dist = tf.norm(tf.expand_dims(X1, 1) - tf.expand_dims(X2, 0), axis=2)
+        repre1 = self.get_representations(X1)
+        repre2 = self.get_representations(X2)
+        cov_mat = tf.zeros_like(dist, dtype=tf.float64)
+
+        for i in range(self.num_lengthscales):
+            attention_lengthscales = tf.linalg.matmul(
+                tf.expand_dims(repre1[:, i], 1),
+                tf.expand_dims(repre2[:, i], 0)
+            )
+            cov_mat += self.rbf(dist, self.lengthscales[i]) * attention_lengthscales
+
+        attention_inputs = tf.linalg.matmul(repre1, repre2, transpose_b=True)
+        cov_mat *= self.amplitude * attention_inputs
+
+        return cov_mat
+
+    @property
+    def num_lengthscales(self):
+        return self.lengthscales.shape[0]
+
+    def rbf(self, X, lengthscale):
+        return tf.exp(-0.5 * (X / lengthscale) ** 2)
+
 
 class OSGPR(GPModel, InternalDataTrainingLossMixin):
     def __init__(
@@ -205,7 +256,8 @@ class GPflowModel:
     def __init__(
         self,
         num_inducing,
-        kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
+        # kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
+        kernel=AttentiveKernel(),
         noise_variance=0.001,
     ):
         self.num_inducing = num_inducing

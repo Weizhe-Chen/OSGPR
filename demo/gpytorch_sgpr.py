@@ -6,6 +6,7 @@ class SGPR(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, kernel, inducing_points, noise_variance):
         train_x = torch.from_numpy(train_x).double()
         train_y = torch.from_numpy(train_y).double().squeeze()
+        inducing_points = torch.from_numpy(inducing_points).double()
         likelihood = gpytorch.likelihoods.GaussianLikelihood()
         likelihood.noise = noise_variance
         super().__init__(train_x, train_y, likelihood)
@@ -51,12 +52,15 @@ class SGPR(gpytorch.models.ExactGP):
         self.eval()
         self.likelihood.eval()
 
-    def predict(self, test_x):
+    def predict_f(self, test_x, full_cov=False):
         test_x = torch.from_numpy(test_x).double()
         with torch.no_grad():
             pred_dist = self(test_x)
             mean = pred_dist.mean.numpy()
-            var = pred_dist.variance.numpy()
+            if full_cov:
+                var = pred_dist.covariance_matrix.numpy()
+            else:
+                var = pred_dist.variance.numpy()
         return mean, var
 
     @property
@@ -67,3 +71,7 @@ class SGPR(gpytorch.models.ExactGP):
     def z_mean(self):
         z_mean, _ = self.predict(self.inducing_points)
         return z_mean
+
+    @property
+    def kernel(self):
+        return self.covar_module.base_kernel
