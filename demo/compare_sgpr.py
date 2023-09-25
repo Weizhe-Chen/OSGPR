@@ -13,7 +13,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 import tensorflow as tf
 import torch
-from botorch.fit import fit_gpytorch_model
+from botorch.fit import fit_gpytorch_mll_scipy, fit_gpytorch_mll_torch
 from gpflow import covariances, utilities
 from gpflow.models import GPModel, InternalDataTrainingLossMixin
 
@@ -39,8 +39,12 @@ class SGPR(gpytorch.models.ExactGP):
         train_x = torch.from_numpy(train_x).double()
         train_y = torch.from_numpy(train_y).double().squeeze()
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
-        fit_gpytorch_model(mll)
-        assert mll.training == False
+        self.train()
+        self.likelihood.train()
+        fit_gpytorch_mll_scipy(mll)
+        # fit_gpytorch_mll_torch(mll)
+        self.eval()
+        self.likelihood.eval()
 
     def predict(self, test_x):
         test_x = torch.from_numpy(test_x).double()
