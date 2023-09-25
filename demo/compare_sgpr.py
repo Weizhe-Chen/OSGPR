@@ -35,7 +35,28 @@ class SGPR(gpytorch.models.ExactGP):
         covar_x = self.covar_module(x)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
-    def fit(self, train_x, train_y):
+    def fit(self, train_x, train_y, num_steps=500):
+        train_x = torch.from_numpy(train_x).double()
+        train_y = torch.from_numpy(train_y).double().squeeze()
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
+        parameters = [
+            dict(params=self.likelihood.parameters(), lr=0.1),
+            dict(params=self.covar_module.base_kernel.parameters(), lr=0.1),
+            dict(params=self.covar_module.inducing_points, lr=0.5),
+        ]
+        optimizer = torch.optim.Adam(parameters)
+        self.train()
+        self.likelihood.train()
+        for _ in range(num_steps):
+            optimizer.zero_grad()
+            output = self(train_x)
+            loss = -mll(output, train_y)
+            loss.backward()
+            optimizer.step()
+        self.eval()
+        self.likelihood.eval()
+
+    def fit_scipy(self, train_x, train_y):
         train_x = torch.from_numpy(train_x).double()
         train_y = torch.from_numpy(train_y).double().squeeze()
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
