@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+import gpflow
 
 from gpflow_model import GPflowModel
 
@@ -55,8 +56,14 @@ def plot_result(
 def main(is_iid_data, num_inducing=10):
     train_x, train_y, batch_size, test_x = get_data(is_iid_data)
     fig, axes = plt.subplots(4, 1, sharey=True, sharex=True)
-    online_model = GPflowModel(num_inducing=num_inducing)
-    batch_model = GPflowModel(num_inducing=num_inducing)
+    online_model = GPflowModel(
+        num_inducing=num_inducing,
+        kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
+    )
+    batch_model = GPflowModel(
+        num_inducing=num_inducing,
+        kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
+    )
     for batch_index in range(3):
         x_batch = train_x[batch_index * batch_size : (batch_index + 1) * batch_size, :]
         y_batch = train_y[batch_index * batch_size : (batch_index + 1) * batch_size, :]

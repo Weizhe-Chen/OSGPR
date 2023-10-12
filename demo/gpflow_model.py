@@ -256,8 +256,7 @@ class GPflowModel:
     def __init__(
         self,
         num_inducing,
-        # kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
-        kernel=AttentiveKernel(),
+        kernel,
         noise_variance=0.001,
     ):
         self.num_inducing = num_inducing
