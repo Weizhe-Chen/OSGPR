@@ -8,14 +8,12 @@ warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
-import gpflow
 
-from gpflow_model import GPflowModel
-
+from model import GPyTorchModel
 
 def get_data(is_iid_data):
-    train_x = np.loadtxt("./data/1d_x_train.txt", delimiter=",").reshape(-1, 1)
-    train_y = np.loadtxt("./data/1d_y_train.txt", delimiter=",").reshape(-1, 1)
+    train_x = np.loadtxt("../data/1d_x_train.txt", delimiter=",").reshape(-1, 1)
+    train_y = np.loadtxt("../data/1d_y_train.txt", delimiter=",").reshape(-1, 1)
     num_train = len(train_y)
     batch_size = num_train // 3
     # Move the first third of the data to the left by 1
@@ -56,14 +54,8 @@ def plot_result(
 def main(is_iid_data, num_inducing=10):
     train_x, train_y, batch_size, test_x = get_data(is_iid_data)
     fig, axes = plt.subplots(4, 1, sharey=True, sharex=True)
-    online_model = GPflowModel(
-        num_inducing=num_inducing,
-        kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
-    )
-    batch_model = GPflowModel(
-        num_inducing=num_inducing,
-        kernel=gpflow.kernels.RBF(variance=1.0, lengthscales=0.8),
-    )
+    online_model = GPyTorchModel(num_inducing=num_inducing)
+    batch_model = GPyTorchModel(num_inducing=num_inducing)
     for batch_index in range(3):
         x_batch = train_x[batch_index * batch_size : (batch_index + 1) * batch_size, :]
         y_batch = train_y[batch_index * batch_size : (batch_index + 1) * batch_size, :]
